@@ -114,32 +114,68 @@ def formatResult(r):
 
 ### Main
 
-journals = ['Developmental Biology', 
-            'Archives of Biochemistry and Biophysics',
-           ]
+journals = [
+    {'mgiName':      'Arch Biochem Biophys',
+     'elsevierName': 'Archives of Biochemistry and Biophysics'},
+    {'mgiName':      'Dev Biol',
+     'elsevierName': 'Developmental Biology'},
+    {'mgiName':      'J Mol Cell Cardiol',
+     'elsevierName': 'Journal of Molecular and Cellular Cardiology'},
+    {'mgiName':      'Brain Research',
+     'elsevierName': 'Brain Research'},
+    {'mgiName':      'Experimental Cell Research',
+     'elsevierName': 'Experimental Cell Research'},
+    {'mgiName':      'Experimental Neurology',
+     'elsevierName': 'Experimental Neurology'},
+    {'mgiName':      'Neuron',
+     'elsevierName': 'Neuron'},
+    {'mgiName':      'Neurobiology of Disease',
+     'elsevierName': 'Neurobiology of Disease'},
+    {'mgiName':      'Bone',
+     'elsevierName': 'Bone'},
+    {'mgiName':      'Neurosci Letters',
+     'elsevierName': 'Neuroscience Letters'},
+    {'mgiName':      'J Invest Dermatol',
+     'elsevierName': 'Journal of Investigative Dermatology'},
+    {'mgiName':      'Cancer Cell',
+     'elsevierName': 'Cancer Cell'},
+    {'mgiName':      'Cancer Lett',
+     'elsevierName': 'Cancer Letters'},
+    {'mgiName':      'Neuroscience',
+     'elsevierName': 'Neuroscience'},
+    {'mgiName':      'Neurobiology of Aging',
+     'elsevierName': 'Neurobiology of Aging'},
+    {'mgiName':      'Matrix Biology',
+     'elsevierName': 'Matrix Biology'},
+    {'mgiName':      'J Bio Chem',
+     'elsevierName': 'Journal of Biological Chemistry'},
+   ]
 
-for j in journals:
-    query = {'pub'        : '"%s"' % j,
-             'qs'         : 'mice OR mouse',
-             'loadedAfter': '2020-12-01T00:00:00Z',
+for journal in journals[-1:]:
+    jName = journal['elsevierName']
+    query = {'pub'        : '"%s"' % jName,
+             #'qs'         : 'mice OR mouse',
+             'qs'         : 'mice',
+             #'loadedAfter': '2020-12-01T00:00:00Z',
+             'loadedAfter': '2021-01-05T00:00:00Z',
              'display'    : { 'sortBy': 'date' }
              }
     docSearch = ElsSearch(query, 'sciencedirect')
     docSearch.execute(client, get_all=True)
 
-    print("%s: %d total search results" % (j, docSearch.tot_num_res))
+    print("%s: %d total search results" % (jName, docSearch.tot_num_res))
     numJournalResults = 0
-    articleCounts = {}  # articleCounts[jname] is num of articles 
+    articleCounts = {}  # articleCounts[jName] is num of articles 
 
     if docSearch.tot_num_res == 0: continue
 
     for r in docSearch.results[:]:
         srcTitle = r['sourceTitle']
         articleCounts[srcTitle] = articleCounts.get(srcTitle, 0) +1
-        if srcTitle != j:       # skip if not the right journal name
-            continue
-        print(formatResult(r))
-        numJournalResults += 1
-    print("%s: %d matching references" % (j, numJournalResults))
+        if srcTitle == jName:       # skip if not the right journal name
+            #print(formatResult(r))
+            numJournalResults += 1
+
+    print("%s: %d matching references" % (jName, numJournalResults))
     print(articleCounts)
 

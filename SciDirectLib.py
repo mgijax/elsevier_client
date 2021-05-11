@@ -160,7 +160,7 @@ class ElsClient(object):
     def execPutRequest(self, URL, params=None):
         """Send request using the PUT method. Return response.
             params should be the API query params coded as json.
-            JIM: should params be json already?
+            TODO: should params be json already?
         """
         ## Throttle request, if need be
         interval = time.time() - self.__ts_last_req
@@ -223,6 +223,92 @@ class ElsClient(object):
     	return {'status_code':self._status_code, 'status_msg': self._status_msg}
 # end class ElsClient -------------------------
 
+class SciDirectSearch(object):
+    def __init__(self, elsClient,
+                query,             # dict that defines query params for PUT API
+                get_all=False,     # if False, only get one API call of results 
+                max_results=500,   # max num of matching results to pull down
+                increment=100,     # num results to get w/each API call
+                ):
+        """ Instantiate search object.
+            See https://dev.elsevier.com/tecdoc_sdsearch_migration.html
+              for details of the PUT API
+        """
+        self._elsClient = elsClient
+        self.get_all = get_all
+        self.max_results = max_results
+        self.increment = increment
+        self._query = query
+        if type(self._query) != type({}):
+            raise TypeError('query is not a dictionary')
+
+        self._results = []       # the results pulled down so far
+        self._tot_num_res = None # total num of matching results at SciDirect
+
+    def execute(self):
+        """Executes the search using the API V2 PUT method.
+            If get_all = False, this retrieves
+            the default number of results specified for the API. If
+            get_all = True, multiple API calls will be made to iteratively get 
+            all results for the search, up to a maximum of 5,000.
+        """
+        url = url_base + 'content/search/sciencedirect'
+
+        if self.get_all is True: # take over the display 'show' & 'offset' attrs
+            query = deepcopy(self._query)
+            displayField = query.get('display', {})
+            displayField['show'] = self.increment
+            if 'offset' not in displayField:
+                displayField['offset'] = 0
+            query['display'] = displayField
+        else:
+            query = self._query
+
+        ## do 1st API call
+        queryJson = json.dumps(query)
+        api_response = self._elsClient.execPutRequest(url, params=queryJson)
+        self._tot_num_res = int(api_response['resultsFound'])
+
+        if self._tot_num_res == 0:
+            self._results = []
+            #self.results_df = pd.DataFrame([])
+            return self
+
+        # got some matching results
+        self._results = api_response['results']
+
+        if self.get_all:     ## do any needed additional API calls
+            while (len(self._results) < self._tot_num_res) and \
+                                    not (len(self._results) >= self.max_results):
+                query['display']['offset'] += self.increment
+
+                queryJson = json.dumps(query)
+                api_response = self._elsClient.execPutRequest(url,
+                                                            params=queryJson)
+                self._results += api_response['results']
+
+        with open('dump.json', 'w') as f:
+            f.write(json.dumps(self._results, sort_keys=True, indent=2))
+        #self._results_df = recast_df(pd.DataFrame(self._results))
+        return self
+
+    def getTotalNumResults(self): return self._tot_num_res
+    def getNumResults(self):      return len(self._results)
+
+    def getResults(self):
+        """ Return the list of raw result records from the API."""
+        return self._results
+
+    def getIterator(self):
+        """ Return iterator of SciDirectReference objects from the results"""
+        it = (SciDirectReference(self._elsClient,data=r) for r in self._results)
+        return it
+
+    def getElsClient(self):   return self._elsClient
+    def getQuery(self):       return self._query
+
+# end class SciDirectSearch -------------------------
+
 class SciDirectReference(object):
     """
     IS:   a reference at ScienceDirect.
@@ -233,81 +319,91 @@ class SciDirectReference(object):
         """ Instantiate a reference object.
             data = record / dict from the SciDirectSearch results from the API
         """
-        self.elsClient = elsClient
+        self._elsClient = elsClient
 
         # unpack fields from SciDirectSearch results
-        self.searchResultsFields = data
+        self._searchResultsFields = data
         self._unpackSciDirectResult()
 
         # fields we have to load from a ref details API call
-        self.detailFields = None      # the results from the details API call
-        self.pmid = None
-        self.pubType = None
-        self.abstract = None
+        self._detailFields = None      # the results from the details API call
+        self._pmid = None
+        self._pubType = None
+        self._abstract = None
+        self._volume = None
 
         # the binary pdf contents are loaded from a subsequent API call
-        self.pdf = None
+        self._pdf = None
 
     def _unpackSciDirectResult(self):
         """ unpack the dict from SciDirectSearch result representing the ref
         """
-        self.pii             = self.searchResultsFields['pii']
-        self.doi             = self.searchResultsFields['doi']
-        self.journal         = self.searchResultsFields['sourceTitle']
-        self.title           = self.searchResultsFields['title']
-        self.volumeIssue     = self.searchResultsFields['volumeIssue']
-        self.loadDate        = self.searchResultsFields['loadDate']
-        self.publicationDate = self.searchResultsFields['publicationDate']
+        self._pii             = self._searchResultsFields['pii']
+        self._doi             = self._searchResultsFields['doi']
+        self._journal         = self._searchResultsFields['sourceTitle']
+        self._title           = self._searchResultsFields['title']
+        self._loadDate        = self._searchResultsFields['loadDate']
+        self._publicationDate = self._searchResultsFields['publicationDate']
 
     # getters for fields from SciDirectSearch result
-    def getPii(self):         return self.pii
-    def getDoi(self):         return self.doi
-    def getJournal(self):     return self.journal
-    def getTitle(self):       return self.title
-    def getVolumeIssue(self): return self.volumeIssue
-    def getLoadDate(self):    return self.loadDate
-    def getPublicationDate(self): return self.publicationDate
+    def getPii(self):         return self._pii
+    def getDoi(self):         return self._doi
+    def getJournal(self):     return self._journal
+    def getTitle(self):       return self._title
+    def getLoadDate(self):    return self._loadDate
+    def getPublicationDate(self): return self._publicationDate
+    def getSearchResultsFields(self): return self._searchResultsFields
+
+    def getElsClient(self):   return self._elsClient
 
     # getters for fields from ref details API call
     def getPmid(self):
         self._getDetails()
-        return self.pmid
+        return self._pmid
     def getPubType(self):
         self._getDetails()
-        return self.pubType
+        return self._pubType
     def getAbstract(self):
         self._getDetails()
-        return self.abstract
+        return self._abstract
+    def getVolume(self):
+        self._getDetails()
+        return self._volume
+    def getDetails(self):
+        self._getDetails()
+        return self._detailFields
 
     def _getDetails(self):
         """ load the reference details from the API if they have not already
             been loaded.
         """
-        if not self.detailFields:
-            url = url_base + 'content/article/pii/' + str(self.pii)
-            response = self.elsClient.execGetRequest(url)
+        if not self._detailFields:
+            url = url_base + 'content/article/pii/' + str(self._pii)
+            response = self._elsClient.execGetRequest(url)
+
             # TODO: should we dump json output somewhere for debugging?
             r = response['full-text-retrieval-response']
-            self.detailFields = r
+            self._detailFields = r
 
             # unpack the fields, just these for now. Other fields are avail
             if 'pubmed-id' in r:
-                self.pmid = r['pubmed-id']
+                self._pmid = r['pubmed-id']
             else:
-                self.pmid = "no PMID"       # not all articles have pmid yet
-            self.pubType  = r['coredata']['pubType']
-            self.abstract = r['coredata']['dc:description']
+                self._pmid = "no PMID"       # not all articles have pmid yet
+            self._pubType  = r['coredata']['pubType']
+            self._abstract = r['coredata']['dc:description']
+            self._volume   = r['coredata']['prism:volume']
 
     # getters for the PDF
     def getPdf(self):
         self._getPdf()
-        return self.pdf
+        return self._pdf
 
     def _getPdf(self):
         """ Get the PDF from the API if we have not already done so
         """
-        if not self.pdf:
-            url = url_base + 'content/article/pii/' + str(self.pii)
-            self.pdf = self.elsClient.execGetRequest(url, contentType='pdf')
+        if not self._pdf:
+            url = url_base + 'content/article/pii/' + str(self._pii)
+            self._pdf = self._elsClient.execGetRequest(url, contentType='pdf')
 
 # end class SciDirectReference -------------------------

@@ -51,6 +51,48 @@ class ElsClient_tests(unittest.TestCase):
 
 # end class ElsClient_tests ######################################
 
+class SciDirectSearch_tests(unittest.TestCase):
+
+    def test_basicSearch(self):
+        query = {'pub'        : 'Bone',
+                 'qs'         : 'mice',
+                 'loadedAfter': '2021-01-05T00:00:00Z',
+                 'display'    : {   'sortBy' :'date',
+                                    'offset' : 0,
+                                    'show'   : 5
+                                }
+                 }
+
+        sds = sdl.SciDirectSearch(elsClient, query, get_all=False)
+        sds.execute()
+        self.assertEqual(sds.getNumResults(), 5)
+        self.assertGreaterEqual(sds.getTotalNumResults(), 131)
+
+    def test_emptySearch(self):
+        query = {'pub'        : 'Bone',
+                 'qs'         : 'mice AND football',
+                 'loadedAfter': '2021-01-05T00:00:00Z',
+                 'display'    : { 'sortBy': 'date' }
+                 }
+        sds = sdl.SciDirectSearch(elsClient, query, get_all=False,
+                                    max_results = 5)
+        sds.execute()
+        self.assertEqual(sds.getNumResults(), 0)
+        self.assertEqual(sds.getTotalNumResults(), 0)
+
+    def test_iterator(self):
+        query = {'pub'        : 'Bone',
+                 'qs'         : 'mice',
+                 'loadedAfter': '2021-01-05T00:00:00Z',
+                 'display'    : { 'sortBy': 'date' }
+                 }
+        sds = sdl.SciDirectSearch(elsClient, query, get_all=False,)
+        sds.execute()
+        piis = [r.getPii() for r in sds.getIterator()] # list of pii's in rslts
+        self.assertTrue("S8756328221001630" in piis)
+
+# end class SciDirecSearch_tests ######################################
+
 class SciDirectReference_tests(unittest.TestCase):
     ref1Data = {      # taken from SciDirect search results. PMID 33417945
         "authors": [
@@ -87,7 +129,6 @@ class SciDirectReference_tests(unittest.TestCase):
         self.assertEqual("10.1016/j.abb.2020.108749", r1.getDoi())
         self.assertEqual("Archives of Biochemistry and Biophysics", r1.getJournal())
         self.assertEqual("Age-related alteration in HNE elimination enzymes", r1.getTitle())
-        self.assertEqual("Volume 699", r1.getVolumeIssue())
         self.assertEqual("2021-01-05T00:00:00.000Z", r1.getLoadDate())
         self.assertEqual("2021-03-15", r1.getPublicationDate())
 
@@ -96,6 +137,7 @@ class SciDirectReference_tests(unittest.TestCase):
         self.assertEqual("33417945", r1.getPmid())
         self.assertEqual("rev", r1.getPubType())
         self.assertEqual("4-hydroxynonena", r1.getAbstract()[:15])
+        self.assertEqual("699", r1.getVolume())
 
     def test_fetching_pdf(self):
         r1 = sdl.SciDirectReference(elsClient, data=self.ref1Data) 

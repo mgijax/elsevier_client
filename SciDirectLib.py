@@ -4,7 +4,7 @@
     This is based on an open source python client provided by Elsevier at
     https://github.com/ElsevierDev/elsapy
 
-    BUT has been much stripped down and simplified for MGI's purposes and
+    BUT has been MUCH stripped down and simplified for MGI's purposes and
     modified to support:
     (1) use of the SciDirect PUT API interface instead of the old, depricated
        GET interface
@@ -37,37 +37,36 @@ Class Overview
     - does throttling, writing http requests to log file
     - knows how to construct http request header w/ appropriate API key, 
         institutional token, and user agent
-    - exec_requestGet(url, contentType) executes a GET request with
-        result content-type either json or pdf
-    - exec_requestPut(url, params) executes a PUT request after coding the
-        params in json. Returns unserialized json result.
+    - executes a GET request(url, contentType)
+        with result content-type either json or pdf.
+        Returns the unserialized json payload or the pdf bytes
+    - executes a PUT request(url, json_params) and returns unserialized json
+        payload.
 
     class SciDirectSearch
     - Does a search against the SciDirect API and provides access to the search
         results in various ways.
-    - search params are specified as a python dict (that will be encoded
-        as json to the ElsClient (and subsequently the SciDirect API)
-    - can get count of matching results, results as json string, or as
+    - search params are specified as a python dict
+    - can get count of matching results, unserialized results, or as
         iterator of SciDirectReference objects (below)
-    - optionally saves search results json to a file (for debugging)
+    - saves search results json to a file (for debugging)
     - fetches the query results in increments & has an overall maximum result
         set size to be polite to the API
 
     class SciDirectReference
     - represents a reference object (article) at SciDirect
-    - has article metadata: reference IDs, Journal, title, abstract, full text,
-        pdf, etc.
+    - has article metadata: reference IDs, Journal, title, abstract, pdf, etc.
     - lazily makes requests to the API to get additional metadata/pdf
 
-There are automated tests for this module:
+There are automated tests for this module: # includes usage examples
     cd tests
     python test_SciDirectLib.py [-v]
 """
 
 import requests, json, time, os, logging
+from copy import deepcopy
 
 def get_logger(name):
-    # TODO: add option to disable logging, configure location of log file
     ## Adapted from https://docs.python.org/3/howto/logging-cookbook.html
 
     # create logger with module name
@@ -96,15 +95,18 @@ def get_logger(name):
     logger.info("SciDirectLib log started.")
     return logger
 
+# TODO: add option to disable logging, configure location of log file
+#       maybe we just want to pass an open log file to write to instead of 
+#       using the logging framework?
 logger = get_logger(__name__)
 url_base = "https://api.elsevier.com/"
 
 class ElsClient(object):
-    """A class that implements a Python interface to api.elsevier.com"""
-
+    """ See class overview above
+    """
     __user_agent = "MGI-SciDirectClient"
-    __min_req_interval = 1                      ## Min. request interval in sec
-    __ts_last_req = time.time()                 ## Tracker for throttling
+    __min_req_interval = 1        ## min num seconds between requests
+    __ts_last_req = 0.0           ## time of the last request (in sec)
  
     def __init__(self, api_key, inst_token=None, ):
         """Initializes a client with a given API Key and, optionally,
@@ -117,8 +119,14 @@ class ElsClient(object):
     def execGetRequest(self, URL, contentType='json'):
         """Send GET request. Return response.
            Supported contentTypes: 'json' or 'pdf'.
+           If contentType = 'json', returns the unserialized json payload
+           if contentType= 'pdf', returns the raw bytes
         """
         ## Validate contentType
+        if contentType not in ['json', 'pdf']:
+            msg = "invalid contentType '%s', only pdf and json are supported" \
+                                                % contentType
+            raise ValueError(msg + '\n')
 
         ## Throttle request, if need be
         interval = time.time() - self.__ts_last_req
@@ -152,15 +160,15 @@ class ElsClient(object):
         ## Success
         self._status_msg='%s data retrieved' % contentType
         if contentType == 'json':
-            return json.loads(r.text)   # or just return the json string?
+            return json.loads(r.text)
         else:
             return r.content        # binary content
     # end execGetRequest() -------------------
 
-    def execPutRequest(self, URL, params=None):
-        """Send request using the PUT method. Return response.
-            params should be the API query params coded as json.
-            TODO: should params be json already?
+    def execPutRequest(self, URL, jsonParams):
+        """ Send request using the PUT method.
+            Return the unserialized json payload
+            jsonParams should be json payload with the API query params
         """
         ## Throttle request, if need be
         interval = time.time() - self.__ts_last_req
@@ -176,9 +184,9 @@ class ElsClient(object):
         if self.inst_token:
             headers["X-ELS-Insttoken"] = self.inst_token
         logger.info('Sending PUT request to ' + URL)
-        logger.info('Params:  ' + str(params))
+        logger.info('Params:  ' + str(jsonParams))
 
-        r = requests.put( URL, headers=headers, data=params)
+        r = requests.put(URL, headers=headers, data=jsonParams)
 
         self.__ts_last_req = time.time()
         self._status_code=r.status_code
@@ -188,46 +196,28 @@ class ElsClient(object):
             self._status_msg="HTTP " + str(r.status_code) + \
                                 " Error from " + URL + \
                                 "\nusing headers: " + str(headers) +  \
-                                "\nand data: " + str(params) +  \
+                                "\nand data: " + str(jsonParams) +  \
                                 ":\n" + r.text
             logger.info(self._status_msg)       # logger.error() instead?
             raise requests.HTTPError(self._status_msg)
 
         ## Success
         self._status_msg='data retrieved'
-        return json.loads(r.text)       # or just return the json string?
+        return json.loads(r.text)
     # end execPutRequest() -------------------
 
-    # properties
-    @property
-    def api_key(self):
-        """Get the apiKey for the client instance"""
-        return self._api_key
-    @api_key.setter
-    def api_key(self, api_key):
-        """Set the apiKey for the client instance"""
-        self._api_key = api_key
-
-    @property
-    def inst_token(self):
-        """Get the instToken for the client instance"""
-        return self._inst_token
-    @inst_token.setter
-    def inst_token(self, inst_token):
-        """Set the instToken for the client instance"""
-        self._inst_token = inst_token
-
-    @property
-    def req_status(self):
+    def getRequestStatus(self):
     	'''Return the status of the request response, '''
     	return {'status_code':self._status_code, 'status_msg': self._status_msg}
 # end class ElsClient -------------------------
 
 class SciDirectSearch(object):
+    """ See class overview above
+    """
     def __init__(self, elsClient,
                 query,             # dict that defines query params for PUT API
-                get_all=False,     # if False, only get one API call of results 
-                max_results=500,   # max num of matching results to pull down
+                getAll=False,      # if False, only get one API call of results 
+                maxResults=5000,   # max num of matching results to pull down
                 increment=100,     # num results to get w/each API call
                 ):
         """ Instantiate search object.
@@ -235,9 +225,9 @@ class SciDirectSearch(object):
               for details of the PUT API
         """
         self._elsClient = elsClient
-        self.get_all = get_all
-        self.max_results = max_results
-        self.increment = increment
+        self._getAll = getAll
+        self._maxResults = maxResults
+        self._increment = increment
         self._query = query
         if type(self._query) != type({}):
             raise TypeError('query is not a dictionary')
@@ -247,17 +237,17 @@ class SciDirectSearch(object):
 
     def execute(self):
         """Executes the search using the API V2 PUT method.
-            If get_all = False, this retrieves
-            the default number of results specified for the API. If
-            get_all = True, multiple API calls will be made to iteratively get 
-            all results for the search, up to a maximum of 5,000.
+            If getAll = False, this retrieves
+                the default number of results specified for the API.
+            If getAll = True, multiple API calls will be made to iteratively
+                get all results for the search, up to a maximum.
         """
         url = url_base + 'content/search/sciencedirect'
 
-        if self.get_all is True: # take over the display 'show' & 'offset' attrs
+        if self._getAll:        # take over the display 'show' & 'offset' attrs
             query = deepcopy(self._query)
             displayField = query.get('display', {})
-            displayField['show'] = self.increment
+            displayField['show'] = self._increment
             if 'offset' not in displayField:
                 displayField['offset'] = 0
             query['display'] = displayField
@@ -266,30 +256,27 @@ class SciDirectSearch(object):
 
         ## do 1st API call
         queryJson = json.dumps(query)
-        api_response = self._elsClient.execPutRequest(url, params=queryJson)
+        api_response = self._elsClient.execPutRequest(url, queryJson)
         self._tot_num_res = int(api_response['resultsFound'])
 
         if self._tot_num_res == 0:
             self._results = []
-            #self.results_df = pd.DataFrame([])
             return self
 
         # got some matching results
         self._results = api_response['results']
 
-        if self.get_all:     ## do any needed additional API calls
+        if self._getAll:     ## do any needed additional API calls
             while (len(self._results) < self._tot_num_res) and \
-                                    not (len(self._results) >= self.max_results):
-                query['display']['offset'] += self.increment
+                                not (len(self._results) >= self._maxResults):
+                query['display']['offset'] += self._increment
 
                 queryJson = json.dumps(query)
-                api_response = self._elsClient.execPutRequest(url,
-                                                            params=queryJson)
+                api_response = self._elsClient.execPutRequest(url, queryJson)
                 self._results += api_response['results']
 
         with open('dump.json', 'w') as f:
             f.write(json.dumps(self._results, sort_keys=True, indent=2))
-        #self._results_df = recast_df(pd.DataFrame(self._results))
         return self
 
     def getTotalNumResults(self): return self._tot_num_res
@@ -301,7 +288,7 @@ class SciDirectSearch(object):
 
     def getIterator(self):
         """ Return iterator of SciDirectReference objects from the results"""
-        it = (SciDirectReference(self._elsClient,data=r) for r in self._results)
+        it = (SciDirectReference(self._elsClient, r) for r in self._results)
         return it
 
     def getElsClient(self):   return self._elsClient
@@ -315,14 +302,14 @@ class SciDirectReference(object):
     HAS:  IDs, basic metadata fields: title, journal, dates, ...
     DOES: loads metadata lazily. Gets PDF.
     """
-    def __init__(self, elsClient, data=None):
+    def __init__(self, elsClient, searchResult):
         """ Instantiate a reference object.
-            data = record / dict from the SciDirectSearch results from the API
+            searchResult = record/dict from SciDirectSearch results from the API
         """
         self._elsClient = elsClient
 
         # unpack fields from SciDirectSearch results
-        self._searchResultsFields = data
+        self._searchResultsFields = searchResult
         self._unpackSciDirectResult()
 
         # fields we have to load from a ref details API call
@@ -385,7 +372,8 @@ class SciDirectReference(object):
             r = response['full-text-retrieval-response']
             self._detailFields = r
 
-            # unpack the fields, just these for now. Other fields are avail
+            # unpack the fields, just these for now.
+            # Other fields are avail, including the full text in xml fmt
             if 'pubmed-id' in r:
                 self._pmid = r['pubmed-id']
             else:

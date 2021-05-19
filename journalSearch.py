@@ -1,37 +1,34 @@
-"""Playing with the Elsevier API client
+"""Playing with the Elsevier API and SciDirectClient.py client library.
 
-Thinking that ultimately we will want to
-    query for set of journals, for a specific "loadedAfter" date
+What is implemented here:
+    query for set of journals, for a specific "loadedAfter" date,
     get all papers that contain "mice" in title, abstract or full text
+    (omitting reference section)
     and
-    output the PDFs for those papers named by PMID_nnnn.pdf.
+    download the PDFs for those papers named by PMID_nnnn.pdf.
+    Currently writes them into a subdirectory named "pdfs/"
+    (this code doesn't check the db to see if we already have the PMID. The
+    production downloader will want to do this.)
 
-    Then those PDFs can be loaded by the littriageload.
+Usage: python journalSearch.py
 
-What is implemented here (playing):
-    just query for a set of journals and a "loadedAfter" date,
-    output papers with "mice OR mouse" in text:
-        pmid, pii, doi, title
-
-What I've learned about the Elsevier client and the API:
+What I've learned about the API:
 0) IMPORTANT: we have an apikey and institutional token (for Jax) that we
     cannot make publicly available.
     So these cannot be in a public github repository.
-    Currently these live in config.json
+    Currently these live in config.json - MOVING THESE TO MGICONFIG
 
 1) This code is using the PUT API to ScienceDirect (full text search).
+    See SciDirectSearch in SciDirectClient.py.
     I could not get any date queries to work using the legacy GET API.
     All the notes below are for the PUT API which takes a json query param
     payload and returns a json result set.
 
     See  https://dev.elsevier.com/tecdoc_sdsearch_migration.html
 
-2) waiting for response from Brian Smith at Elsevier about how we can get PDFs.
-    The APIs do not provide a way to download PDFs.
-
 3) The json results payload does not include PMID.
-    I do a separate API FullDoc() call to get PMID.
-    Maybe there is a bulk way to pass pii IDs to Scopus?
+    The SciDirectReference class does a separate API call to get the PMID,
+    other bits of metadata, and the PDF.
     NOTE papers can appear in ScienceDirect before they have their PMID.
     So this downloader may want to skip papers UNTIL their PMID appears here.
     (do we ever get papers from Elsevier journals that don't eventually appear
@@ -50,7 +47,7 @@ What I've learned about the Elsevier client and the API:
         searching for "Cells" returns the "Cell" journal.
     This is kind of annoying for us when we want to search by exact journals.
 
-    We need to use the exact journal names instead of our journal abbreviations.
+    We need to use the exact journal names instead of MGI journal abbreviations.
     I.e., "Dev Biol" doesn't match anything.
 
 6) FULL TEXT searching: "qs" field specifies your text. It supposedly searches
@@ -58,124 +55,129 @@ What I've learned about the Elsevier client and the API:
     Supports "AND" and "OR" and quoted phrases.
     Does not seem to support wildcards.
     I haven't determined if it does stemming or not.
-
-    I have noticed that searching "qs" for "mice OR mouse" returns more papers
-    than just "mice". So I think we should use that.
 """
 
-from elsclient import ElsClient
-from elsprofile import ElsAuthor, ElsAffil
-from elsdoc import FullDoc, AbsDoc
-from elssearch import ElsSearch
+from SciDirectLib import ElsClient, SciDirectSearch, SciDirectReference
 import json
     
-## Load configuration
-con_file = open("config.json")
-config = json.load(con_file)
-con_file.close()
-
-## Initialize Elsevier API client
-client = ElsClient(config['apikey'])
-client.inst_token = config['insttoken']
-
 FIELDSEP = '|'
-OUTPUT_HEADER = FIELDSEP.join([
-                        'PMID',
-                        'pii',
-                        'DOI',
-                        #'journal',
-                        'title',
-                        ])
 
 # ------------------------------
 def formatResult(r):
-    """ Return formatted text from a ScienceDirect query result r.
-        r is json object.
+    """ Return formatted text from a SciDirectReference object.
     """
-    # load full document info from API to get PMID
-    pii = r['pii']
-    #pii_doc = FullDoc(sd_pii=pii)
-
-    if True or pii_doc.read(client):
-        #data = pii_doc.data
-        #pmid = data.get('pubmed-id', 'no_pmid')
-        text = FIELDSEP.join([
-                        #pmid,
-                        pii,
-                        r['doi'], # = data['coredata']['prism:doi'],
-                        r['loadDate'],
-                        #r['sourceTitle'],
-                        #r['title'][:20],
-                        ])
-    else:
-        text = "Read failed for pii='%s'" % pii
+    text = FIELDSEP.join([
+                    r.getPmid(),
+                    #r.getPii(),
+                    r.getDoi(),
+                    r.getPubType(),
+                    r.getVolume(),
+                    r.getLoadDate()[:10],
+                    r.getPublicationDate()[:10],
+                    r.getTitle()[:10],
+                    ])
     return text
 # ------------------------------
 
 ### Main
 
+ACTUALLY_WRITE_PDFS = False     # skip writing if debugging
+AFTER_DATE = '2021-04-01'       # get articles added after this date
+
+# The MGI journals that are available at SciDirect
+# These are taken from Harold's list of journals searched via Quosa.
+#  Are there any other MGI monitored journals that are at Elsevier/SciDirect?
+class Journal(object):  # simple journal struct
+    def __init__(self, mgiName, elsevierName):
+        self.mgiName = mgiName
+        self.elsevierName = elsevierName
+
 journals = [
-    {'mgiName':      'Arch Biochem Biophys',
-     'elsevierName': 'Archives of Biochemistry and Biophysics'},
-    {'mgiName':      'Dev Biol',
-     'elsevierName': 'Developmental Biology'},
-    {'mgiName':      'J Mol Cell Cardiol',
-     'elsevierName': 'Journal of Molecular and Cellular Cardiology'},
-    {'mgiName':      'Brain Research',
-     'elsevierName': 'Brain Research'},
-    {'mgiName':      'Experimental Cell Research',
-     'elsevierName': 'Experimental Cell Research'},
-    {'mgiName':      'Experimental Neurology',
-     'elsevierName': 'Experimental Neurology'},
-    {'mgiName':      'Neuron',
-     'elsevierName': 'Neuron'},
-    {'mgiName':      'Neurobiology of Disease',
-     'elsevierName': 'Neurobiology of Disease'},
-    {'mgiName':      'Bone',
-     'elsevierName': 'Bone'},
-    {'mgiName':      'Neurosci Letters',
-     'elsevierName': 'Neuroscience Letters'},
-    {'mgiName':      'J Invest Dermatol',
-     'elsevierName': 'Journal of Investigative Dermatology'},
-    {'mgiName':      'Cancer Cell',
-     'elsevierName': 'Cancer Cell'},
-    {'mgiName':      'Cancer Lett',
-     'elsevierName': 'Cancer Letters'},
-    {'mgiName':      'Neuroscience',
-     'elsevierName': 'Neuroscience'},
-    {'mgiName':      'Neurobiology of Aging',
-     'elsevierName': 'Neurobiology of Aging'},
-    {'mgiName':      'Matrix Biology',
-     'elsevierName': 'Matrix Biology'},
-    {'mgiName':      'J Bio Chem',
-     'elsevierName': 'Journal of Biological Chemistry'},
+    Journal('Arch Biochem Biophys', 'Archives of Biochemistry and Biophysics'),
+    Journal('Dev Biol', 'Developmental Biology'),
+    Journal('J Mol Cell Cardiol','Journal of Molecular and Cellular Cardiology'),
+    Journal('Brain Research', 'Brain Research'),
+    Journal('Experimental Cell Research', 'Experimental Cell Research'),
+    Journal('Experimental Neurology', 'Experimental Neurology'),
+    Journal('Neuron', 'Neuron'),
+    Journal('Neurobiology of Disease', 'Neurobiology of Disease'),
+    Journal('Bone', 'Bone'),
+    Journal('Neurosci Letters', 'Neuroscience Letters'),
+    Journal('J Invest Dermatol', 'Journal of Investigative Dermatology'),
+    Journal('Cancer Cell', 'Cancer Cell'),
+    Journal('Cancer Lett', 'Cancer Letters'),
+    Journal('Neuroscience', 'Neuroscience'),
+    Journal('Neurobiology of Aging', 'Neurobiology of Aging'),
+    Journal('Matrix Biology', 'Matrix Biology'),
+    Journal('J Bio Chem', 'Journal of Biological Chemistry'),
    ]
 
-for journal in journals[-1:]:
-    jName = journal['elsevierName']
+# Would like to understand what the SciDirect pubTypes are. Collect them
+pubTypes = {}       # pubTypes['type'] = num of refs with that type
+
+print("Looking for Papers after %s" % AFTER_DATE)
+
+## Load API key and Jax institution token from config file
+## TODO: get these values from env instead and have these added to mgiconfig
+con_file = open("config.json")
+config = json.load(con_file)
+con_file.close()
+
+## Initialize Elsevier API client
+elsClient = ElsClient(config['apikey'], inst_token=config['insttoken'])
+
+for journal in journals[:]:
+    jName = journal.elsevierName
     query = {'pub'        : '"%s"' % jName,
-             #'qs'         : 'mice OR mouse',
              'qs'         : 'mice',
-             #'loadedAfter': '2020-12-01T00:00:00Z',
-             'loadedAfter': '2021-01-05T00:00:00Z',
+             'loadedAfter': AFTER_DATE + 'T00:00:00Z',
              'display'    : { 'sortBy': 'date' }
              }
-    docSearch = ElsSearch(query, 'sciencedirect')
-    docSearch.execute(client, get_all=True)
+    search = SciDirectSearch(elsClient, query, getAll=True).execute()
 
-    print("%s: %d total search results" % (jName, docSearch.tot_num_res))
-    numJournalResults = 0
-    articleCounts = {}  # articleCounts[jName] is num of articles 
+    print("%s: %d total search results" % (jName, search.getTotalNumResults()))
 
-    if docSearch.tot_num_res == 0: continue
+    # keep track of matching journal names. The search may match journals
+    #  that are not the ones we want
+    articleCounts = {}      # articleCounts[jName] is num of articles 
+    numJournalResults = 0   # num of refs from the journal we're looking for 
 
-    for r in docSearch.results[:]:
-        srcTitle = r['sourceTitle']
-        articleCounts[srcTitle] = articleCounts.get(srcTitle, 0) +1
-        if srcTitle == jName:       # skip if not the right journal name
-            #print(formatResult(r))
-            numJournalResults += 1
+    numPMIDs = 0            # num of refs w/ PMIDs
+    numPDFs = 0             # num of PDFs written for this journal
 
-    print("%s: %d matching references" % (jName, numJournalResults))
+    if search.getTotalNumResults() == 0: continue
+
+    for r in search.getIterator():
+        try:
+            journal = r.getJournal()
+            articleCounts[journal] = articleCounts.get(journal, 0) +1
+            if journal == jName:       # skip if not the right journal name
+                numJournalResults += 1
+                print(formatResult(r))
+
+                # gather pubtypes
+                pubType = r.getPubType()
+                pubTypes[pubType] = pubTypes.get(pubType, 0) +1
+
+                # write pdf if we have PMID
+                if r.getPmid() != 'no PMID':
+                    numPMIDs += 1 
+                    if ACTUALLY_WRITE_PDFS:
+                        numPDFs += 1 
+                        fname = 'pdfs/PMID_%s.pdf' % r.getPmid()
+                        with open(fname, 'wb') as f:
+                            f.write(r.getPdf())
+        except: # in case we get any exceptions working w/ this r, let's see it
+            print("Reference exception\n")
+            print(json.dumps(r.getDetails(), sort_keys=True, indent=2))
+            raise
+
+    print("%s: %d matching references, %d w/ PMIDs, %d PDFs written" % \
+                            (jName, numJournalResults, numPMIDs, numPDFs))
+    print("Summary of matching journal names:")
     print(articleCounts)
 
+print()
+print("Summary of pubTypes across all journals:")
+for k in sorted(pubTypes.keys()):
+    print("%s: %d" % (k, pubTypes[k]))

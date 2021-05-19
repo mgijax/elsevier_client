@@ -49,7 +49,8 @@ Class Overview
     - search params are specified as a python dict
     - can get count of matching results, unserialized results, or as
         iterator of SciDirectReference objects (below)
-    - saves search results json to a file (for debugging)
+    - saves search results json to a file (for debugging).
+        TODO: make this configurable.
     - fetches the query results in increments & has an overall maximum result
         set size to be polite to the API
 
@@ -105,7 +106,7 @@ class ElsClient(object):
     """ See class overview above
     """
     __user_agent = "MGI-SciDirectClient"
-    __min_req_interval = 1        ## min num seconds between requests
+    __min_req_interval = 0.5        ## min num seconds between requests
     __ts_last_req = 0.0           ## time of the last request (in sec)
  
     def __init__(self, api_key, inst_token=None, ):
@@ -374,13 +375,10 @@ class SciDirectReference(object):
 
             # unpack the fields, just these for now.
             # Other fields are avail, including the full text in xml fmt
-            if 'pubmed-id' in r:
-                self._pmid = r['pubmed-id']
-            else:
-                self._pmid = "no PMID"       # not all articles have pmid yet
-            self._pubType  = r['coredata']['pubType']
-            self._abstract = r['coredata']['dc:description']
-            self._volume   = r['coredata']['prism:volume']
+            self._pmid     = r.get('pubmed-id', 'no PMID')
+            self._pubType  = r['coredata'].get('pubType', 'no pubType')
+            self._abstract = r['coredata'].get('dc:description', 'no abstract')
+            self._volume   = r['coredata'].get('prism:volume', 'no volume')
 
     # getters for the PDF
     def getPdf(self):

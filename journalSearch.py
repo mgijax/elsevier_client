@@ -58,6 +58,7 @@ What I've learned about the API:
 """
 
 from SciDirectLib import ElsClient, SciDirectSearch, SciDirectReference
+import os
 import json
     
 FIELDSEP = '|'
@@ -118,13 +119,11 @@ pubTypes = {}       # pubTypes['type'] = num of refs with that type
 print("Looking for Papers after %s" % AFTER_DATE)
 
 ## Load API key and Jax institution token from config file
-## TODO: get these values from env instead and have these added to mgiconfig
-con_file = open("config.json")
-config = json.load(con_file)
-con_file.close()
+apikey = os.environ['ELSEVIER_APIKEY']
+insttoken = os.environ['ELSEVIER_INSTTOKEN']
 
 ## Initialize Elsevier API client
-elsClient = ElsClient(config['apikey'], inst_token=config['insttoken'])
+elsClient = ElsClient(apikey, inst_token=insttoken)
 
 for journal in journals[:]:
     jName = journal.elsevierName

@@ -13,13 +13,10 @@ import json
 import requests
 import SciDirectLib as sdl
 
-## Load configuration   - TODO: need to get these from Env or something
-con_file = open("../config.json")
-config = json.load(con_file)
-con_file.close()
-
 ## Initialize Elsevier API client
-elsClient = sdl.ElsClient(config['apikey'], inst_token=config['insttoken'])
+apikey = os.environ['ELSEVIER_APIKEY']
+insttoken = os.environ['ELSEVIER_INSTTOKEN']
+elsClient = sdl.ElsClient(apikey, inst_token=insttoken)
 
 ######################################
 

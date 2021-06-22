@@ -16,7 +16,8 @@ What I've learned about the API:
 0) IMPORTANT: we have an apikey and institutional token (for Jax) that we
     cannot make publicly available.
     So these cannot be in a public github repository.
-    Currently these live in config.json - MOVING THESE TO MGICONFIG
+    These are specified in mgiconfig as: ELSEVIER_APIKEY & ELSEVIER_INSTTOKEN
+    This script assumes these are defined in the environment.
 
 1) This code is using the PUT API to ScienceDirect (full text search).
     See SciDirectSearch in SciDirectClient.py.
@@ -82,12 +83,12 @@ def formatResult(r):
 
 ### Main
 
-ACTUALLY_WRITE_PDFS = False     # skip writing if debugging
-AFTER_DATE = '2021-04-01'       # get articles added after this date
+ACTUALLY_WRITE_PDFS = True     # skip writing if debugging
+AFTER_DATE = '2021-05-15'       # get articles added after this date
 
 # The MGI journals that are available at SciDirect
 # These are taken from Harold's list of journals searched via Quosa.
-#  Are there any other MGI monitored journals that are at Elsevier/SciDirect?
+# Are there any other MGI monitored journals that are at Elsevier/SciDirect?
 class Journal(object):  # simple journal struct
     def __init__(self, mgiName, elsevierName):
         self.mgiName = mgiName

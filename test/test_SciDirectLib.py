@@ -42,8 +42,11 @@ class ElsClient_tests(unittest.TestCase):
         pii = 'S0021925821005226'
         url = sdl.url_base + 'content/article/pii/' + str(pii)
         pdf = elsClient.execGetRequest(url, contentType='pdf')
+        #fp = open(pii + '.pdf', 'wb')
+        #fp.write(pdf)
+        #fp.close()
         self.assertEqual(pdf[:8], b'%PDF-1.7')
-        self.assertEqual(len(pdf), 4101559)
+        self.assertEqual(len(pdf), 5111458) # fails if publisher updates the pdf
 
     def test_execGetRequest_httperror(self):
         url = sdl.url_base + 'content/article/pii/' + 'foo'
@@ -127,7 +130,7 @@ class SciDirectSearch_tests(unittest.TestCase):
 
     def test_iterator(self):
         query = {'pub'        : 'Bone',
-                 'qs'         : 'mice',
+                 'qs'         : 'mice AND "odontoblast differentiation"',
                  'loadedAfter': '2021-01-05T00:00:00Z',
                  'display'    : { 'sortBy': 'date' }
                  }
@@ -181,9 +184,9 @@ class SciDirectReference_tests(unittest.TestCase):
 
     def test_fetching_details(self):
         r1 = sdl.SciDirectReference(elsClient, self.ref1Data) 
+        #print(json.dumps(r1.getDetails(), sort_keys=True, indent="  "))
         self.assertEqual("33417945", r1.getPmid())
         self.assertEqual("rev", r1.getPubType())
-        self.assertEqual("4-hydroxynonena", r1.getAbstract()[:15])
         self.assertEqual("699", r1.getVolume())
         self.assertTrue('coredata' in r1.getDetails().keys())
 
@@ -196,7 +199,6 @@ class SciDirectReference_tests(unittest.TestCase):
         #fp.close()
 
 # end class SciDirectReference_tests ######################################
-
 
 if __name__ == '__main__':
     unittest.main()

@@ -352,9 +352,9 @@ class SciDirectReference(object):
     def getPubType(self):
         self._getDetails()
         return self._pubType
-    def getAbstract(self):
-        self._getDetails()
-        return self._abstract
+    #def getAbstract(self):     # not supported for now, see _getDetails()
+    #    self._getDetails()
+    #    return self._abstract
     def getVolume(self):
         self._getDetails()
         return self._volume
@@ -367,19 +367,26 @@ class SciDirectReference(object):
             been loaded.
         """
         if not self._detailFields:
-            url = url_base + 'content/article/pii/' + str(self._pii)
+            # This URL gets full info including full text and abstract
+            #url = url_base + 'content/article/pii/' + str(self._pii)
+
+            # This URL just gets meta info and has a smaller payload
+            url = url_base + 'content/article/pii/%s?view=META' % str(self._pii)
             response = self._elsClient.execGetRequest(url)
 
             # TODO: should we dump json output somewhere for debugging?
             r = response['full-text-retrieval-response']
+            #print(json.dumps(response, sort_keys=True, indent="  "))
             self._detailFields = r
 
             # unpack the fields, just these for now.
             # Other fields are avail, including the full text in xml fmt
             self._pmid     = r.get('pubmed-id', 'no PMID')
             self._pubType  = r['coredata'].get('pubType', 'no pubType')
-            self._abstract = r['coredata'].get('dc:description', 'no abstract')
             self._volume   = r['coredata'].get('prism:volume', 'no volume')
+
+            # If we need abstract, change back to the full URL above
+            #self._abstract = r['coredata'].get('dc:description', 'no abstract')
 
     # getters for the PDF
     def getPdf(self):
